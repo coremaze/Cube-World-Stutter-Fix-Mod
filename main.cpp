@@ -2,51 +2,25 @@
 
 UINT_PTR base;
 
+char query[] = "PRAGMA synchronous=OFF;\0";
+unsigned int query_ptr = (unsigned int)&query;
+unsigned int sqlite_exec;
+unsigned int ASMSQLiteInjection_JMP_back;
+void ASMSQLiteInjection(){
+    asm("push 0");
+    asm("push 0");
+    asm("push 0");
+    asm("push [_query_ptr]");
+    asm("push dword ptr [edi+0x4]");
+    asm("call [_sqlite_exec]");
+    asm("add esp, 0x14");
 
-void DLL_EXPORT ASMSQLFunction(){
-
-    asm("call [_shouldUpdatePtr]");
-    asm("test al, al");
-    asm("jnz 0f");
-
-    asm("mov eax, [_base]"); //skip saving
-    asm("add eax, 0x20C83D");
-    asm("jmp eax");
-
-    asm("0:"); //continue as normal
-    asm("mov eax, [_base]");
-    asm("add eax, 0x20C723");
-    asm("lea ecx, [edi+0x0AC]"); //original code
-    asm("jmp eax");
-
+    //original code
+    asm("push esi");
+    asm("mov esi,[ebp+0x08]");
+    asm("cmp dword ptr [esi+0x14],0x10");
+    asm("jmp [_ASMSQLiteInjection_JMP_back]");
 }
-
-bool isFloatWithinThreshold(float f, float thres){
-    return f <= thres && f >= -thres;
-}
-
-bool shouldUpdate(){
-    DWORD entityaddr = (DWORD)(base + 0x36b1c8);
-    entityaddr = *(DWORD*)entityaddr;
-    entityaddr += 0x39C;
-    entityaddr = *(DWORD*)entityaddr;
-    float* velocityx = (float*)(entityaddr+0x34);
-    float* velocityy = (float*)(entityaddr+0x38);
-    float* velocityz = (float*)(entityaddr+0x3C);
-    float threshold = 0.01;
-    //Stop the SQL stuff from happening if the player is moving.
-    //When the player is standing still, it will resume saving as normal.
-    if (isFloatWithinThreshold(*velocityx, threshold) &&
-        isFloatWithinThreshold(*velocityy, threshold) &&
-        isFloatWithinThreshold(*velocityz, threshold)){
-        return true;
-    }
-    else {
-        return false;
-    }
-}
-DWORD shouldUpdatePtr = (DWORD)&shouldUpdate;
-
 
 void WriteJMP(BYTE* location, BYTE* newFunction){
 	DWORD dwOldProtection;
@@ -62,9 +36,10 @@ extern "C" DLL_EXPORT BOOL APIENTRY DllMain(HINSTANCE hinstDLL, DWORD fdwReason,
     base = (UINT_PTR)GetModuleHandle(NULL);
     switch (fdwReason)
     {
-
         case DLL_PROCESS_ATTACH:
-            WriteJMP((BYTE*)(base + 0x20C71D), (BYTE*)&ASMSQLFunction);
+            sqlite_exec = base + 0x120760; //function we'll use to exec sql
+            ASMSQLiteInjection_JMP_back = base + 0x49A24;
+            WriteJMP((BYTE*)(base + 0x49A1C), (BYTE*)&ASMSQLiteInjection);
             break;
     }
     return TRUE;

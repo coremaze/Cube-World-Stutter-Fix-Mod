@@ -1,72 +1,46 @@
-#include <windows.h>
-#include "callbacks.h"
+#include "main.h"
 
-unsigned int base;
-float multiplier = 1.0;
-float maxcrafting = 1.0;
+UINT_PTR base;
 
-unsigned int CraftingProgressInjection_JMP_back;
-__declspec(naked) __declspec(dllexport) void  CraftingProgressInjection(){
-    //Just apply the multiplier
-    asm("mulss xmm0, [_multiplier]");
+char query[] = "PRAGMA synchronous=OFF;\0";
+unsigned int query_ptr = (unsigned int)&query;
+unsigned int sqlite_exec;
+unsigned int ASMSQLiteInjection_JMP_back;
+void ASMSQLiteInjection(){
+    asm("push 0");
+    asm("push 0");
+    asm("push 0");
+    asm("push [_query_ptr]");
+    asm("push dword ptr [edi+0x4]");
+    asm("call [_sqlite_exec]");
+    asm("add esp, 0x14");
 
-    asm("addss xmm0, xmm1"); //original code
-    asm("comiss xmm0, [_maxcrafting]");
-
-    asm("jmp [_CraftingProgressInjection_JMP_back]");
+    //original code
+    asm("push esi");
+    asm("mov esi,[ebp+0x08]");
+    asm("cmp dword ptr [esi+0x14],0x10");
+    asm("jmp [_ASMSQLiteInjection_JMP_back]");
 }
-
-//When the cursor leaves the button.
-__declspec(naked) void __declspec(dllexport) CraftingDone(){
-    asm("mov dword ptr _multiplier, 0x3F800000"); //reset multiplier
-    asm("mov byte ptr [edi + 0x3C4], 0x0");
-
-    asm("mov esi, [_base]"); //jump back
-    asm("add esi, 0x34711");
-    asm("jmp esi");
-
-}
-
-__stdcall void __attribute__((noinline)) __declspec(dllexport) HandleFinishCrafting(){
-    /*
-    This seems to be the correct calculation.
-    Wollay says it increases by 20% each time, and this max speed seems to be correct.
-    */
-    if (multiplier < 5.0){
-        multiplier *= 1.20;
-    }
-}
-
 
 void WriteJMP(BYTE* location, BYTE* newFunction){
-    DWORD dwOldProtection;
-    VirtualProtect(location, 5, PAGE_EXECUTE_READWRITE, &dwOldProtection);
+	DWORD dwOldProtection;
+	VirtualProtect(location, 5, PAGE_EXECUTE_READWRITE, &dwOldProtection);
     location[0] = 0xE9; //jmp
     *((DWORD*)(location + 1)) = (DWORD)(( (unsigned INT32)newFunction - (unsigned INT32)location ) - 5);
-    VirtualProtect(location, 5, dwOldProtection, &dwOldProtection);
+	VirtualProtect(location, 5, dwOldProtection, &dwOldProtection);
 }
 
 
-DWORD WINAPI __attribute__((noinline)) __declspec(dllexport) RegisterCallbacks(){
-        RegisterCallback("RegisterFinishCraftingCallback", HandleFinishCrafting);
-        return 0;
-}
-
-
-
-extern "C" __declspec(dllexport) bool APIENTRY DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
+extern "C" DLL_EXPORT BOOL APIENTRY DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {
-    base = (unsigned int)GetModuleHandle(NULL);
+    base = (UINT_PTR)GetModuleHandle(NULL);
     switch (fdwReason)
     {
-
         case DLL_PROCESS_ATTACH:
-            CraftingProgressInjection_JMP_back = base + 0x8F20E;
-            WriteJMP((BYTE*)(base + 0x8F203), (BYTE*)&CraftingProgressInjection);
-
-            WriteJMP((BYTE*)(base + 0x3470A), (BYTE*)&CraftingDone);
-            CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)RegisterCallbacks, 0, 0, NULL);
+            sqlite_exec = base + 0x120760; //function we'll use to exec sql
+            ASMSQLiteInjection_JMP_back = base + 0x49A24;
+            WriteJMP((BYTE*)(base + 0x49A1C), (BYTE*)&ASMSQLiteInjection);
             break;
     }
-    return true;
+    return TRUE;
 }
